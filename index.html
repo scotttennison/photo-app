@@ -371,12 +371,47 @@
             });
         }
 
-        function loadPhotos() {
-            console.log('Loading photos from S3...');
-            
+       function loadPhotos() {
+    console.log('Loading photos from S3...');
+    
+    if (!currentUser) {
+        console.log('No user logged in');
+        document.getElementById('photoGrid').innerHTML = '<p>📷 Please sign in to see photos</p>';
+        return;
+    }
+
+    // Get session and configure credentials BEFORE accessing S3
+    currentUser.getSession(function(err, session) {
+        if (err) {
+            console.error('Session error when loading photos:', err);
+            document.getElementById('photoGrid').innerHTML = '<p>Error loading photos. Please try signing in again.</p>';
+            return;
+        }
+
+        console.log('Session retrieved, configuring credentials...');
+
+        // Configure AWS credentials with Cognito Identity
+        const loginKey = `cognito-idp.${AWS_REGION}.amazonaws.com/${COGNITO_USER_POOL_ID}`;
+        AWS.config.credentials = new AWS.CognitoIdentityCredentials({
+            IdentityPoolId: IDENTITY_POOL_ID,
+            Logins: {
+                [loginKey]: session.getIdToken().getJwtToken()
+            }
+        });
+
+        // Refresh credentials
+        AWS.config.credentials.refresh(function(err) {
+            if (err) {
+                console.error('Credentials refresh error:', err);
+                document.getElementById('photoGrid').innerHTML = '<p>Authentication error. Please sign out and sign in again.</p>';
+                return;
+            }
+
+            console.log('Credentials refreshed successfully, loading photos...');
+
+            // NOW we can access S3 with proper credentials
             s3 = new AWS.S3({
-                region: AWS_REGION,
-                signatureVersion: 'v4'
+                region: AWS_REGION
             });
 
             const params = {
@@ -387,8 +422,8 @@
                 const photoGrid = document.getElementById('photoGrid');
                 
                 if (err) {
-                    console.error('Error loading photos:', err);
-                    photoGrid.innerHTML = '<p>📷 Upload your first photo to see it here!</p>';
+                    console.error('S3 listObjects error:', err);
+                    photoGrid.innerHTML = '<p>❌ Error loading photos: ' + err.message + '</p>';
                     return;
                 }
 
@@ -399,7 +434,7 @@
                     return;
                 }
 
-                console.log('Found', data.Contents.length, 'photos');
+                console.log('✅ Found', data.Contents.length, 'photos');
 
                 data.Contents.forEach(function(obj) {
                     const photoUrl = `https://${S3_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${obj.Key}`;
@@ -408,14 +443,16 @@
                     photoDiv.className = 'photo-item';
                     photoDiv.innerHTML = `
                         <img src="${photoUrl}" alt="Photo" 
-                             onerror="this.parentElement.innerHTML='<p>Error loading image</p>'">
+                             onerror="console.error('Failed to load image:', '${obj.Key}'); this.parentElement.innerHTML='<p>Error loading image</p>'">
                         <p style="font-size: 12px; margin: 5px 0; word-break: break-all;">${obj.Key}</p>
                     `;
                     
                     photoGrid.appendChild(photoDiv);
                 });
             });
-        }
+        });
+    });
+}
     </script>
 </body>
 </html>
