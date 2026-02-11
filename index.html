@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS385 Photo Gallery</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { 
+            color: #333;
+            text-align: center;
+        }
+        h2 {
+            color: #555;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h3 {
+            color: #666;
+            margin-top: 20px;
+        }
+        .auth-section, .app-section { 
+            margin: 20px 0; 
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        input {
+            width: calc(100% - 30px);
+            max-width: 400px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            padding: 10px 20px;
+        }
+        button:hover { 
+            background-color: #45a049; 
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .hidden { 
+            display: none; 
+        }
+        #status { 
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .success { 
+            background-color: #d4edda; 
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error { 
+            background-color: #f8d7da; 
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .photo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .photo-item {
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 5px;
+            background: #fafafa;
+            transition: transform 0.2s;
+        }
+        .photo-item:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .photo-item img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 5px;
+        }
+        hr {
+            margin: 30px 0;
+            border: none;
+            border-top: 1px solid #ddd;
+        }
+        .verify-section {
+            background-color: #fff3cd;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            border: 1px solid #ffeaa7;
+        }
+        .note {
+            font-size: 14px;
+            color: #666;
+            font-style: italic;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📸 CS385 Photo Gallery</h1>
+        
+        <div id="status"></div>
+        
+        <!-- LOGIN/SIGNUP SECTION -->
+        <div id="authSection" class="auth-section">
+            <h2>Sign In or Sign Up</h2>
+            
+            <h3>Create Account</h3>
+            <input type="email" id="email" placeholder="Email">
+            <input type="password" id="password" placeholder="Password (min 8 chars, mix of upper/lower/numbers/symbols)">
+            <input type="text" id="name" placeholder="Your Name">
+            <br>
+            <button onclick="signUp()">Sign Up</button>
+            <button onclick="signIn()">Sign In</button>
+            
+            <div class="verify-section">
+                <h3>✉️ Verify Your Email</h3>
+                <p class="note">After signing up, check your email for a verification code and enter it here:</p>
+                <input type="email" id="verifyEmail" placeholder="Your Email">
+                <input type="text" id="verifyCode" placeholder="6-Digit Verification Code">
+                <br>
+                <button onclick="verifyUser()">Verify Email</button>
+            </div>
+        </div>
+
+        <!-- APP SECTION (shown after login) -->
+        <div id="appSection" class="app-section hidden">
+            <h2>Welcome, <span id="userName"></span>! 👋</h2>
+            <button onclick="signOut()">Sign Out</button>
+            
+            <h3>📤 Upload a Photo</h3>
+            <input type="file" id="fileInput" accept="image/*">
+            <button onclick="uploadPhoto()">Upload Photo</button>
+            
+            <h3>🖼️ Your Photos</h3>
+            <div id="photoGrid" class="photo-grid">
+                <p>Loading photos...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- AWS SDK -->
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1000.0.min.js"></script>
+    
+    <script>
+        // ✅ YOUR ACTUAL AWS CONFIGURATION VALUES
+        const COGNITO_USER_POOL_ID = 'us-east-1_U16muhJGM';
+        const COGNITO_CLIENT_ID = '3f0o98tpo7dkfu18e1i1fjl6bc';
+        const S3_BUCKET_NAME = 'cs385-photo-app-tennison-2026';
+        const AWS_REGION = 'us-east-1';
+        const IDENTITY_POOL_ID = 'us-east-1:67681cae-7c98-4549-a056-e2e83745303f';
+
+        // Configure AWS
+        AWS.config.region = AWS_REGION;
+
+        // Configure Cognito
+        const poolData = {
+            UserPoolId: COGNITO_USER_POOL_ID,
+            ClientId: COGNITO_CLIENT_ID
+        };
+
+        let userPool, currentUser, s3;
+
+        // Initialize on page load
+        window.onload = function() {
+            console.log('Page loaded, initializing...');
+            
+            if (typeof AWS === 'undefined') {
+                showStatus('Error: AWS SDK failed to load. Check your internet connection.', 'error');
+                return;
+            }
+            
+            // Load Cognito SDK
+            loadCognitoSDK();
+        };
+
+        function loadCognitoSDK() {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/amazon-cognito-identity-js@6.0.1/dist/amazon-cognito-identity.min.js';
+            script.onload = function() {
+                console.log('Cognito SDK loaded successfully');
+                userPool = new AmazonCognitoIdentity.CognitoUserPool(poolData);
+                currentUser = userPool.getCurrentUser();
+                
+                if (currentUser) {
+                    currentUser.getSession(function(err, session) {
+                        if (err) {
+                            console.log('No valid session found');
+                            showAuthSection();
+                            return;
+                        }
+                        if (session.isValid()) {
+                            console.log('Valid session found, logging in...');
+                            showAppSection();
+                            loadPhotos();
+                        } else {
+                            showAuthSection();
+                        }
+                    });
+                } else {
+                    console.log('No current user found');
+                    showAuthSection();
+                }
+            };
+            script.onerror = function() {
+                showStatus('Error: Failed to load Cognito SDK. Check your internet connection.', 'error');
+            };
+            document.head.appendChild(script);
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = type;
+            setTimeout(() => { 
+                status.textContent = ''; 
+                status.className = ''; 
+            }, 5000);
+        }
+
+        function signUp() {
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const name = document.getElementById('name').value.trim();
+
+            if (!email || !password || !name) {
+                showStatus('❌ Please fill in all fields!', 'error');
+                return;
+            }
+
+            // Validate email format
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                showStatus('❌ Please enter a valid email address!', 'error');
+                return;
+            }
+
+            // Validate password
+            if (password.length < 8) {
+                showStatus('❌ Password must be at least 8 characters!', 'error');
+                return;
+            }
+
+            const attributeList = [
+                new AmazonCognitoIdentity.CognitoUserAttribute({ Name: 'email', Value: email }),
+                new AmazonCognitoIdentity.CognitoUserAttribute({ Name: 'name', Value: name })
+            ];
+
+            console.log('Attempting to sign up user:', email);
+            
+            userPool.signUp(email, password, attributeList, null, function(err, result) {
+                if (err) {
+                    console.error('Sign up error:', err);
+                    showStatus('❌ Sign up failed: ' + err.message, 'error');
+                    return;
+                }
+                console.log('Sign up successful:', result);
+                showStatus('✅ Success! Check your email for a verification code, then use the Verify Email section below.', 'success');
+                
+                // Pre-fill verification email
+                document.getElementById('verifyEmail').value = email;
+            });
+        }
+
+        function verifyUser() {
+            const email = document.getElementById('verifyEmail').value.trim();
+            const code = document.getElementById('verifyCode').value.trim();
+
+            if (!email || !code) {
+                showStatus('❌ Please enter both email and verification code!', 'error');
+                return;
+            }
+
+            const userData = {
+                Username: email,
+                Pool: userPool
+            };
+
+            const cognitoUser = new AmazonCognitoIdentity.CognitoUser(userData);
+
+            console.log('Attempting to verify user:', email);
+
+            cognitoUser.confirmRegistration(code, true, function(err, result) {
+                if (err) {
+                    console.error('Verification error:', err);
+                    showStatus('❌ Verification failed: ' + err.message, 'error');
+                    return;
+                }
+                console.log('Verification successful:', result);
+                showStatus('✅ Email verified successfully! You can now sign in.', 'success');
+                
+                // Clear verification fields
+                document.getElementById('verifyCode').value = '';
+            });
+        }
+
+        function signIn() {
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+
+            if (!email || !password) {
+                showStatus('❌ Please enter email and password!', 'error');
+                return;
+            }
+
+            const authenticationData = {
+                Username: email,
+                Password: password
+            };
+
+            const authenticationDetails = new AmazonCognitoIdentity.AuthenticationDetails(authenticationData);
+            
+            const userData = {
+                Username: email,
+                Pool: userPool
+            };
+
+            currentUser = new AmazonCognitoIdentity.CognitoUser(userData);
+
+            console.log('Attempting to sign in user:', email);
+
+            currentUser.authenticateUser(authenticationDetails, {
+                onSuccess: function(session) {
+                    console.log('Login successful');
+                    showStatus('✅ Login successful!', 'success');
+                    showAppSection();
+                    loadPhotos();
+                },
+                onFailure: function(err) {
+                    console.error('Login error:', err);
+                    if (err.code === 'UserNotConfirmedException') {
+                        showStatus('❌ Please verify your email first! Check your email for the verification code.', 'error');
+                    } else {
+                        showStatus('❌ Login failed: ' + err.message, 'error');
+                    }
+                }
+            });
+        }
+
+        function signOut() {
+            if (currentUser) {
+                currentUser.signOut();
+                console.log('User signed out');
+                showAuthSection();
+                showStatus('✅ Signed out successfully!', 'success');
+            }
+        }
+
+        function showAuthSection() {
+            document.getElementById('authSection').classList.remove('hidden');
+            document.getElementById('appSection').classList.add('hidden');
+        }
+
+        function showAppSection() {
+            document.getElementById('authSection').classList.add('hidden');
+            document.getElementById('appSection').classList.remove('hidden');
+            
+            currentUser.getUserAttributes(function(err, attributes) {
+                if (!err && attributes) {
+                    const nameAttr = attributes.find(attr => attr.Name === 'name');
+                    if (nameAttr) {
+                        document.getElementById('userName').textContent = nameAttr.Value;
+                    }
+                }
+            });
+        }
+
+        function uploadPhoto() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                showStatus('❌ Please select a file first!', 'error');
+                return;
+            }
+
+            // Check file size (limit to 5MB)
+            if (file.size > 5 * 1024 * 1024) {
+                showStatus('❌ File is too large! Maximum size is 5MB.', 'error');
+                return;
+            }
+
+            // Check file type
+            if (!file.type.startsWith('image/')) {
+                showStatus('❌ Please select an image file!', 'error');
+                return;
+            }
+
+            if (!currentUser) {
+                showStatus('❌ Please sign in first!', 'error');
+                return;
+            }
+
+            console.log('Uploading file:', file.name);
+            showStatus('⏳ Uploading...', 'info');
+
+            // Get current user session token
+            currentUser.getSession(function(err, session) {
+                if (err) {
+                    showStatus('❌ Session error: ' + err.message, 'error');
+                    return;
+                }
+
+                // Configure AWS credentials with Cognito Identity
+                const loginKey = `cognito-idp.${AWS_REGION}.amazonaws.com/${COGNITO_USER_POOL_ID}`;
+                AWS.config.credentials = new AWS.CognitoIdentityCredentials({
+                    IdentityPoolId: IDENTITY_POOL_ID,
+                    Logins: {
+                        [loginKey]: session.getIdToken().getJwtToken()
+                    }
+                });
+
+                // Refresh credentials
+                AWS.config.credentials.refresh(function(err) {
+                    if (err) {
+                        console.error('Credentials refresh error:', err);
+                        showStatus('❌ Authentication error: ' + err.message, 'error');
+                        return;
+                    }
+
+                    console.log('Credentials refreshed successfully');
+
+                    // Now upload with proper credentials
+                    s3 = new AWS.S3({
+                        params: { Bucket: S3_BUCKET_NAME },
+                        region: AWS_REGION
+                    });
+
+                    const fileName = Date.now() + '-' + file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+                    const params = {
+                        Key: fileName,
+                        Body: file,
+                        ContentType: file.type
+                    };
+
+                    s3.upload(params, function(err, data) {
+                        if (err) {
+                            console.error('Upload error:', err);
+                            showStatus('❌ Upload failed: ' + err.message, 'error');
+                        } else {
+                            console.log('Upload successful:', data);
+                            showStatus('✅ Photo uploaded successfully!', 'success');
+                            fileInput.value = '';
+                            loadPhotos();
+                        }
+                    });
+                });
+            });
+        }
+
+        function loadPhotos() {
+            console.log('Loading photos from S3...');
+            
+            s3 = new AWS.S3({
+                region: AWS_REGION,
+                signatureVersion: 'v4'
+            });
+
+            const params = {
+                Bucket: S3_BUCKET_NAME
+            };
+
+            s3.listObjectsV2(params, function(err, data) {
+                const photoGrid = document.getElementById('photoGrid');
+                
+                if (err) {
+                    console.error('Error loading photos:', err);
+                    photoGrid.innerHTML = '<p>📷 Upload your first photo to see it here!</p>';
+                    return;
+                }
+
+                photoGrid.innerHTML = '';
+
+                if (!data.Contents || data.Contents.length === 0) {
+                    photoGrid.innerHTML = '<p>📷 No photos yet. Upload your first photo!</p>';
+                    return;
+                }
+
+                console.log('Found', data.Contents.length, 'photos');
+
+                data.Contents.forEach(function(obj) {
+                    const photoUrl = `https://${S3_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${obj.Key}`;
+                    
+                    const photoDiv = document.createElement('div');
+                    photoDiv.className = 'photo-item';
+                    photoDiv.innerHTML = `
+                        <img src="${photoUrl}" alt="Photo" 
+                             onerror="this.parentElement.innerHTML='<p>Error loading image</p>'">
+                        <p style="font-size: 12px; margin: 5px 0; word-break: break-all;">${obj.Key}</p>
+                    `;
+                    
+                    photoGrid.appendChild(photoDiv);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
